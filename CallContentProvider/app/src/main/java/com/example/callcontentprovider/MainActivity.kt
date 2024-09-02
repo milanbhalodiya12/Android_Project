@@ -81,29 +81,32 @@
 //}
 //
 
-
-
 package com.example.callcontentprovider
 
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
 import android.provider.ContactsContract
-import android.widget.ListView
-import android.widget.SimpleCursorAdapter
-import android.widget.Toast
+import android.text.Editable
+import android.text.TextWatcher
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 class MainActivity : AppCompatActivity() {
 
     private val CALL_PHONE_REQUEST_CODE = 1
     private val READ_CONTACTS_REQUEST_CODE = 111
 
-    private val cols = arrayOf(ContactsContract.Contacts.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER, ContactsContract.Contacts._ID)
+    private val cols = arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER, ContactsContract.CommonDataKinds.Phone._ID)
+    private lateinit var adapter: SimpleCursorAdapter
+    private var cursor: Cursor? = null
+    private var phoneNumberToCall: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,12 +117,43 @@ class MainActivity : AppCompatActivity() {
         } else {
             readContacts()
         }
+
+        val fab: FloatingActionButton = findViewById(R.id.floatingActionButton2)
+        fab.setOnClickListener {
+            addNewContact()
+        }
+
+        val searchView: EditText = findViewById(R.id.searchBar)
+        searchView.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) {
+                filterContacts(s.toString())
+            }
+
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+        })
+//        searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
+//            override fun onQueryTextSubmit(query: String?): Boolean {
+//                if (query != null) {
+//                    filterContacts(query)
+//                }
+//                return true
+//            }
+//
+//            override fun onQueryTextChange(newText: String?): Boolean {
+//                if (newText != null) {
+//                    filterContacts(newText)
+//                }
+//                return true
+//            }
+//        })
     }
 
     private fun readContacts() {
-        val cursor = contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, cols, null, null, null)
-        val adapter = SimpleCursorAdapter(
-            applicationContext,
+        cursor = contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, cols, null, null, null)
+        adapter = SimpleCursorAdapter(
+            this,
             android.R.layout.simple_list_item_2,
             cursor,
             cols,
@@ -132,22 +166,39 @@ class MainActivity : AppCompatActivity() {
 
         listView.setOnItemClickListener { _, _, position, _ ->
             cursor?.moveToPosition(position)
-            val phoneNumber = cursor?.getString(cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER))
-
-            if (phoneNumber != null) {
+            phoneNumberToCall = cursor?.getString(cursor?.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER) ?: -1)
+            if (phoneNumberToCall != null) {
+                // Check for CALL_PHONE permission
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
                     ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CALL_PHONE), CALL_PHONE_REQUEST_CODE)
                 } else {
-                    makePhoneCall(phoneNumber)
+                    makePhoneCall(phoneNumberToCall!!)
                 }
             }
         }
+    }
+
+    private fun filterContacts(query: String) {
+        val filterCursor = contentResolver.query(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            cols,
+            "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?",
+            arrayOf("%$query%"),
+            null
+        )
+        adapter.changeCursor(filterCursor)
     }
 
     private fun makePhoneCall(phoneNumber: String) {
         val callIntent = Intent(Intent.ACTION_CALL)
         callIntent.data = Uri.parse("tel:$phoneNumber")
         startActivity(callIntent)
+    }
+
+    private fun addNewContact() {
+        val intent = Intent(Intent.ACTION_INSERT)
+        intent.type = ContactsContract.Contacts.CONTENT_TYPE
+        startActivity(intent)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -162,7 +213,8 @@ class MainActivity : AppCompatActivity() {
             }
             CALL_PHONE_REQUEST_CODE -> {
                 if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    // Permission granted
+                    // Permission granted, make the call
+                    phoneNumberToCall?.let { makePhoneCall(it) }
                 } else {
                     Toast.makeText(this, "Call permission denied", Toast.LENGTH_SHORT).show()
                 }
